@@ -20,15 +20,17 @@ class Network:
     # predict this model.
     # x: ndarray => data
     # batch_size: int => batch size
-    def predict(self, x):
+    def predict(self, x, isTrain=False):
         for layer in self.layers.values():
-            x = layer.forward(x)
+            if layer.canSwitchTrain():
+                x = layer.forward(x, isTrain=isTrain)
+            else:
+                x = layer.forward(x)
+            
+            print(x.shape)
+        
         return x
     
     def learn(self, x, t):
         # forward
         self.predict(x)
-    
-    def set_batch_size(self, batch_size):
-        for layer in self.layers:
-            layer.set_batch_size(batch_size)

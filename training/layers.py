@@ -27,6 +27,9 @@ class Layer:
     
     def print(self):
         pass
+    
+    def canSwitchTrain(self):
+        return False
 
 
 class Convolution(Layer):
@@ -99,7 +102,7 @@ class TransposedConvolution(Layer):
 
     def __init__(self, input_shape, filter_num, filter_size=4, stride=1, pad=0, weight_init_std=0.01, name=""):
         super().__init__(name)
-        self.W = weight_init_std * np.random.randn(filter_num, input_shape[0], filter_size, filter_size)
+        self.W = weight_init_std * np.random.randn(input_shape[0], filter_num, filter_size, filter_size)
         self.b = np.zeros(filter_num)
         self.stride = stride
         self.pad = pad
@@ -113,7 +116,7 @@ class TransposedConvolution(Layer):
     
     def forward(self, x):
         self.x = x
-        gcol = np.tensordot(self.W, x, (1, 0)).astype(x.dtype, copy=False)
+        gcol = np.tensordot(self.W, x, (0, 1)).astype(x.dtype, copy=False)
         gcol = np.rollaxis(gcol, 3)
         _, OH, OW = self.calc_output_shape()
         y = col2im(gcol, OH, OW, stride=self.stride, pad=self.pad)
@@ -121,8 +124,8 @@ class TransposedConvolution(Layer):
         return y
     
     def backward(self, dout):
-        N, C, H, W= self.x.shape
-        FN, _, FH, FW = self.W.shape
+        N, _, _, _= self.x.shape
+        _, _, FH, FW = self.W.shape
         self.db = np.sum(dout, axis=(0, 2, 3))
 
         col = im2col(dout, FH, FW, stride=self.stride, pad=self.pad)
@@ -133,7 +136,7 @@ class TransposedConvolution(Layer):
         return dy
     
     def _backward(self, x, W):
-        C, FN, FH, FW = W.shape
+        FN, C, FH, FW = W.shape
         N, C, h, w = x.shape
 
         out_h = int(1 + (h + 2*self.pad - FH) / self.stride)
@@ -152,7 +155,7 @@ class TransposedConvolution(Layer):
         self.b -= self.db * lr
     
     def calc_output_shape(self):
-        FN, _, FH, FW = self.W.shape
+        C, FN, FH, FW = self.W.shape
         _, H, W = self.input_shape
         out_h, out_w = calc_transposed_conv_size(H, W, FH, FW, self.stride, self.pad)
 
@@ -192,10 +195,27 @@ class LeakyRelu(Layer):
     def print(self):
         message = self.name + "=> output_shape:" +  self.calc_output_shape()
         print(message)
+    
+class Relu(Layer):
+
+    def __init__(self, name=""):
+        super().__init__(name)
+        self.x = None
+    
+    def forward(self, x):
+        self.x = x
+        x[x < 0] = 0
+        return x
+    
+    def backward(self, dout):
+        dout = np.zeros_like(self.x)
+        dout[self.x >= 0] = 1
+        dout[self.x < 0] = 0
+        return dout
 
 class BatchNormalization(Layer):
 
-    def __init__(self, gamma=0.99, beta=0.1, momentum=0.99, eplison=10e-5, isTrain=True, name=""):
+    def __init__(self, gamma=0.99, beta=0.1, momentum=0.99, eplison=10e-5, name=""):
         super().__init__(name)
         self.gamma = gamma
         self.beta = beta
@@ -217,16 +237,14 @@ class BatchNormalization(Layer):
 
         self.m = None
 
-        self.isTrain = isTrain
-
     
-    def forward(self, x):
+    def forward(self, x, isTrain=True):
         self.input_shape = x.shape
         if x.ndim != 2:
             self.input_shape = x.shape
             x = x.reshape(x.shape[0], -1)
 
-        if self.isTrain:
+        if isTrain:
             mean = x.mean(axis=0)
             variance = x.var(axis=0)
 
@@ -284,3 +302,47 @@ class BatchNormalization(Layer):
     def print(self):
         message = self.name + "=> output_shape:" +  self.calc_output_shape()
         print(message)
+    
+    def canSwitchTrain(self):
+        return True
+
+class Dropout(Layer):
+
+    def __init__(self, dropout_ratio=0.50, name=""):
+        super().__init__(name)
+        self.dropout_ratio = dropout_ratio
+        self.mask = None
+    
+    def forward(self, x, isTrain=True):
+        if self.mask is None:
+            self.mask = np.random.rand(*x.shape) > self.dropout_ratio
+
+        if isTrain:
+            return x * self.mask
+        
+        else:
+            return x * (1 - self.dropout_ratio)
+        
+    def backward(self, dout):
+        return dout * self.mask
+    
+    def calc_output_shape(self):
+        return "return input_shape"
+    
+    def print(self):
+        message = self.name + "=> output_shape:" +  self.calc_output_shape()
+        print(message)
+    
+class Tanh(Layer):
+    def __init__(self, name=""):
+        super().__init__(name)
+        self.y = None
+
+    
+    def forward(self, x):
+        self.y = np.tanh(x)
+        return self.y
+    
+    def backward(self, dout):
+        one = np.ones_like(self.y)
+        return dout * (one - np.power(self.y, 2))
