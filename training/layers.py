@@ -130,7 +130,6 @@ class TransposedConvolution(Layer):
         self.dW = np.dot(x_col, col).reshape(self.W.shape)
 
         dy = self._backward(dout, self.W)
-        print(dy.shape)
         return dy
     
     def _backward(self, x, W):
